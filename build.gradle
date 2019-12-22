@@ -33,17 +33,30 @@ def versionName = "0.0.1"
 group "com.bosh.demo"
 version versionName
 
+
+def getIp() {
+    def out = new ByteArrayOutputStream()
+    exec {
+        workingDir '/Users/bosh/AndroidStudioProject/git/mine/android/shell'
+        commandLine './getIp.sh'
+        standardOutput = out
+    }
+    return out.toString()
+}
+
 uploadArchives {
-    repositories{
+    repositories {
         mavenDeployer {
-            repository(url : uri('http://192.168.1.107:8081/repository/maven-releases/')){
+            repository(url: uri("http://${getIp().trim()}:8081/repository/maven-releases/")) {
                 authentication(userName: 'admin', password: 'admin123')
             }
             pom.project {
-                version "0.3.4"
+                version "0.3.8"
                 artifactId 'gradleplugin'
                 groupId 'com.bosh.demo'
             }
         }
     }
 }
+
+
