@@ -1,15 +1,20 @@
 package com.bosh.plugin
 
-
+import com.android.build.gradle.BaseExtension
+import com.android.build.gradle.AppExtension
+import com.android.build.gradle.LibraryExtension
 import com.bosh.task.TestTask
+import com.bosh.transform.RestrictToTransform
+import com.bosh.utils.Logger
 import org.gradle.api.*
 
 class ComponentLibraryPlugin implements Plugin<Project> {
     @Override
     void apply(Project project) {
-        println('test plugin')
+        Logger.i("plugin demo begin!")
         project.rootProject
         project.android {
+            Logger.i("Arouter module name setting")
             defaultConfig {
                 javaCompileOptions {
                     annotationProcessorOptions {
@@ -19,12 +24,20 @@ class ComponentLibraryPlugin implements Plugin<Project> {
             }
 
             lintOptions{
+
+                //should deal all warnings
                 abortOnError true
-                allWaringingsAsError true
+                warningsAsErrors true
+
+                // improve the priority of RestrictedApi
+                enable "RestrictedApi"
+                fatal "RestrictedApi"
+
+                ignore "InvalidPackage"
             }
         }
         project.afterEvaluate {
-            println('create task: hello')
+            Logger.i('create task: hello')
             project.tasks.create("hello", TestTask.class, new Action<TestTask>() {
                 @Override
                 void execute(TestTask t) {
@@ -42,11 +55,15 @@ class ComponentLibraryPlugin implements Plugin<Project> {
 
             }
         }
-
     }
 
+    /**
+     * require that all library module resource must have prefix!
+     * @param project
+     */
     private static void checkResourcePrefix(Project project) {
-        String prefix = project.android.resourcePrefix
+        AppExtension android = getAndroid(project)
+        String prefix = android.resourcePrefix
         if (!prefix?.trim()) {
             throw new GradleException('module must have resourcePrefix at \'build.gradle\',like:\n' +
                     'android {\n' +
@@ -58,9 +75,21 @@ class ComponentLibraryPlugin implements Plugin<Project> {
         }
     }
 
+    private static AppExtension getAndroid(Project project) {
+        return project.getExtensions().findByType(AppExtension.class)
+    }
+
+    private static LibraryExtension getLibrary(Project project) {
+        return project.getExtensions().findByType(LibraryExtension.class)
+    }
+
     private static void checkAndroid(Project project) {
         if (!project.android) {
             throw new GradleException('must apply from \"com.android.application\" or \"com.android.library\" first')
         }
+    }
+
+    private static void addRestrict(Project project) {
+        project.extensions.findByType(BaseExtension.class).registerTransform(new RestrictToTransform())
     }
 }
