@@ -1,8 +1,11 @@
 package com.bosh.plugin
 
+import com.android.build.gradle.AppPlugin
 import com.android.build.gradle.BaseExtension
 import com.android.build.gradle.AppExtension
 import com.android.build.gradle.LibraryExtension
+import com.android.build.gradle.LibraryPlugin
+import com.bosh.ext.ConfigExtension
 import com.bosh.task.TestTask
 import com.bosh.transform.RestrictToTransform
 import com.bosh.utils.Logger
@@ -11,8 +14,14 @@ import org.gradle.api.*
 class ComponentLibraryPlugin implements Plugin<Project> {
     @Override
     void apply(Project project) {
+        Logger.make(project)
         Logger.i("plugin demo begin!")
-        project.rootProject
+
+
+        if (project.plugins.hasPlugin(AppPlugin)) {
+            registerTransform(project)
+        }
+
         project.android {
             Logger.i("Arouter module name setting")
             defaultConfig {
@@ -23,7 +32,7 @@ class ComponentLibraryPlugin implements Plugin<Project> {
                 }
             }
 
-            lintOptions{
+            lintOptions {
 
                 //should deal all warnings
                 abortOnError true
@@ -45,6 +54,7 @@ class ComponentLibraryPlugin implements Plugin<Project> {
                     t.sayHello()
                 }
             })
+
             checkAndroid(project)
             if (project.hasProperty('android')) {
 
@@ -62,7 +72,15 @@ class ComponentLibraryPlugin implements Plugin<Project> {
      * @param project
      */
     private static void checkResourcePrefix(Project project) {
-        AppExtension android = getAndroid(project)
+        def android
+        if (project.plugins.hasPlugin(LibraryPlugin)) {
+            android = getLibrary(project)
+        } else if (project.plugins.hasPlugin(AppPlugin)) {
+            android = getAndroid(project)
+        } else {
+            Logger.i("there has no android plugin")
+            return
+        }
         String prefix = android.resourcePrefix
         if (!prefix?.trim()) {
             throw new GradleException('module must have resourcePrefix at \'build.gradle\',like:\n' +
@@ -76,7 +94,7 @@ class ComponentLibraryPlugin implements Plugin<Project> {
     }
 
     private static AppExtension getAndroid(Project project) {
-        return project.getExtensions().findByType(AppExtension.class)
+        return project.getExtensions().getByType(AppExtension.class)
     }
 
     private static LibraryExtension getLibrary(Project project) {
@@ -89,7 +107,7 @@ class ComponentLibraryPlugin implements Plugin<Project> {
         }
     }
 
-    private static void addRestrict(Project project) {
-        project.extensions.findByType(BaseExtension.class).registerTransform(new RestrictToTransform())
+    private static void registerTransform(Project project) {
+        getAndroid(project).registerTransform(new RestrictToTransform(project))
     }
 }
