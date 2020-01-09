@@ -1,6 +1,6 @@
 package com.bosh.transform
 
-import androidx.annotation.RestrictTo
+import com.alibaba.android.arouter.register.utils.ScanSetting
 import com.bosh.utils.Logger
 import javassist.ClassPool
 import javassist.CtClass
@@ -12,9 +12,14 @@ import javassist.bytecode.ClassFile
 import javassist.bytecode.ConstPool
 import javassist.bytecode.annotation.Annotation
 import javassist.bytecode.annotation.EnumMemberValue
+import org.apache.commons.io.IOUtils
 import org.gradle.api.Project
 
 import java.lang.reflect.Modifier
+import java.util.jar.JarEntry
+import java.util.jar.JarFile
+import java.util.jar.JarOutputStream
+import java.util.zip.ZipEntry
 
 class GenerateRestrictTo {
     static ClassPool classPool = ClassPool.getDefault()
@@ -66,7 +71,7 @@ class GenerateRestrictTo {
                 res = false
             } else {
                 if (ctClass.annotations == null) {
-                    res =  true
+                    res = true
                 } else {
                     res = true
                     ctClass.annotations.each { Object object ->
@@ -75,7 +80,7 @@ class GenerateRestrictTo {
                             if (typeName.contains("com.china.bosh.mylibrary.annotation")
                                     || typeName.contains("androidx.annotation.RestrictTo")) {
                                 Logger.w("typeName:" + typeName)
-                                res =  false
+                                res = false
                             }
                         }
                     }
@@ -86,9 +91,29 @@ class GenerateRestrictTo {
         return res
     }
 
-    static void generate(CtClass cc, String path) {
+    static generate(CtClass cc, String path) {
         def name = cc.name
         Logger.w("generate RestrictTo to before:" + name)
+        cc = modifyClass(cc)
+        cc.writeFile(path)
+        cc.detach()
+    }
+
+    static byte[] generate(CtClass cc) {
+        def bytes
+        def name = cc.name
+        Logger.w("generate RestrictTo to before:" + name)
+        if (cc.frozen) {
+            cc.defrost()
+        }
+        cc = modifyClass(cc)
+
+        bytes = cc.toBytecode()
+        cc.detach()
+        return bytes
+    }
+
+    private static CtClass modifyClass(CtClass cc) {
         if (cc.frozen) {
             cc.defrost()
         }
@@ -97,30 +122,59 @@ class GenerateRestrictTo {
 
         AnnotationsAttribute annotationsAttribute = new AnnotationsAttribute(constPool, AnnotationsAttribute.visibleTag)
         Annotation annotation = new Annotation("androidx.annotation.RestrictTo", constPool)
-//        Logger.w("generate RestrictTo to before1:" + name)
         EnumMemberValue enumMemberValue = new EnumMemberValue(constPool)
-//        Logger.w("generate RestrictTo to before2:" + name)
         enumMemberValue.setType("androidx.annotation.RestrictTo\$Scope")
-//        Logger.w("generate RestrictTo to before3:" + name)
         enumMemberValue.setValue('LIBRARY')
-//        Logger.w("generate RestrictTo to before4:" + name)
         annotation.addMemberValue("value", enumMemberValue)
-//        Logger.w("generate RestrictTo to before5:" + name)
         annotationsAttribute.addAnnotation(annotation)
-//        Logger.w("generate RestrictTo to before6:" + name)
         classFile.addAttribute(annotationsAttribute)
-
-//        if ("com.china.bosh.demo.Test".equals(name)) {
-//            CtField ctField = new CtField(CtClass.booleanType, "isTest", cc)
-//            ctField.setModifiers(Modifier.PUBLIC)
-//            cc.addField(ctField)
-//        }
-
-//        cc.annotations().each {Object object ->
-//            Logger.w("annotation name:" + object.getClass().name)
-//        }
-//        Logger.w("class byte code :" + cc.toString())
-        cc.writeFile(path)
-        cc.detach()
+        return cc
     }
+
+    static File insertRestrictCodeIntoJarFile(File jarFile, Project project) {
+        classPool.appendClassPath(jarFile.absolutePath)
+        classPool.appendClassPath(project.android.bootClasspath[0].toString())//android.jar
+        classPool.importPackage("androidx.annotation.RestrictTo")
+        classPool.importPackage("java.lang.annotation")
+        if (jarFile) {
+            def optJar = new File(jarFile.getParent(), jarFile.name + ".opt")
+            if (optJar.exists())
+                optJar.delete()
+            def file = new JarFile(jarFile)
+            Enumeration enumeration = file.entries()
+            JarOutputStream jarOutputStream = new JarOutputStream(new FileOutputStream(optJar))
+
+            while (enumeration.hasMoreElements()) {
+                JarEntry jarEntry = (JarEntry) enumeration.nextElement()
+                String entryName = jarEntry.getName()
+                ZipEntry zipEntry = new ZipEntry(entryName)
+                InputStream inputStream = file.getInputStream(jarEntry)
+                jarOutputStream.putNextEntry(zipEntry)
+                Logger.w("entryName:" + entryName)
+                if (entryName.contains("bosh")) {
+                    def cc = classPool.makeClass(inputStream)
+                    if (check(cc)) {
+
+                        Logger.w('Insert init code to class >> ' + entryName)
+                        def bytes = generate(cc)
+                        jarOutputStream.write(bytes)
+                    } else {
+                        jarOutputStream.write(IOUtils.toByteArray(inputStream))
+                    }
+                }
+                inputStream.close()
+                jarOutputStream.closeEntry()
+            }
+            jarOutputStream.close()
+            file.close()
+
+            if (jarFile.exists()) {
+                jarFile.delete()
+            }
+            optJar.renameTo(jarFile)
+        }
+        return jarFile
+    }
+
+
 }

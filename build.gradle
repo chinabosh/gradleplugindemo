@@ -31,6 +31,7 @@ dependencies {
     compile localGroovy()
     testCompile 'org.spockframework:spock-core:1.0-groovy-2.4'
     compile 'org.javassist:javassist:3.26.0-GA'
+    compile 'androidx.annotation:annotation:1.1.0'
 //    compile fileTree(dir: 'src/lib', includes: ['*.jar'])
 }
 
