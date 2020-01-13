@@ -1,11 +1,9 @@
 package com.bosh.transform
 
-import com.alibaba.android.arouter.register.utils.ScanSetting
+
 import com.bosh.utils.Logger
 import javassist.ClassPool
 import javassist.CtClass
-import javassist.CtField
-import javassist.CtMethod
 import javassist.NotFoundException
 import javassist.bytecode.AnnotationsAttribute
 import javassist.bytecode.ClassFile
@@ -15,7 +13,6 @@ import javassist.bytecode.annotation.EnumMemberValue
 import org.apache.commons.io.IOUtils
 import org.gradle.api.Project
 
-import java.lang.reflect.Modifier
 import java.util.jar.JarEntry
 import java.util.jar.JarFile
 import java.util.jar.JarOutputStream
@@ -23,6 +20,57 @@ import java.util.zip.ZipEntry
 
 class GenerateRestrictTo {
     static ClassPool classPool = ClassPool.getDefault()
+
+    public static ArrayList<String> sourceDirs = new ArrayList<>()
+
+    /**
+     * 搜索需要添加代码的包路径，如：com/company/project
+     * @param fileSet
+     */
+    static void searchSourcePackage(Set<File> fileSet) {
+        if (fileSet == null || fileSet.size() <= 0) {
+            return
+        }
+        sourceDirs.clear()
+        fileSet.each { file ->
+            getPackagePath(file, 0, new StringBuilder())
+        }
+        sourceDirs.each {
+            Logger.i("source package:" + it)
+        }
+    }
+
+    /**
+     *
+     * @param file
+     * @param depth
+     * @param result
+     */
+    private static void getPackagePath(File file, int depth, StringBuilder result) {
+        //搜索3层目录，一般为com/company/project
+//        if (depth >= 3) {
+//            def res = result.toString()
+//            if (!"".equals(res) && !sourceDirs.contains(res)) {
+//                sourceDirs.add(res)
+//            }
+//            return
+//        }
+        boolean isDir = false
+        file.eachDir { subFile ->
+            if (depth != 0) {
+                result.append(File.separator)
+            }
+            result.append(subFile.name)
+            getPackagePath(subFile, depth + 1, new StringBuilder(result))
+            isDir = true
+        }
+        if (!isDir) {
+            def res = result.toString()
+            if (!"".equals(res) && !sourceDirs.contains(res)) {
+                sourceDirs.add(res)
+            }
+        }
+    }
 
 
     static void generate(File dir, Project project) {
@@ -42,15 +90,22 @@ class GenerateRestrictTo {
         if (name.endsWith(".class")) {
 //            Logger.w("class name:" + name)
             try {
-                int index = name.indexOf("com/")
+                def index = -1
+                sourceDirs.each {
+                    def tmp = name.indexOf(it)
+                    if (tmp > -1) {
+                        index = tmp
+                    }
+                }
                 if (index > -1) {
                     name = name.substring(index, name.length() - 6)
-                    name = name.replaceAll("/", ".")
-                    CtClass cc = classPool.getCtClass(name)
-                    def checkResult = !check(cc)
+                    name = name.replaceAll(File.separator, ".")
+
+                    def checkResult = !checkResourceAndRepeat(name)
                     if (checkResult) {
                         return
                     }
+                    CtClass cc = classPool.getCtClass(name)
                     generate(cc, path)
                     Logger.w("generate absolute path:" + file.absolutePath)
                 }
@@ -62,29 +117,48 @@ class GenerateRestrictTo {
         }
     }
 
-    static boolean check(CtClass ctClass) {
+    static boolean checkResourceAndRepeat(String name) {
         def res = false
-        String name = ctClass.name
-        if (name.contains("bosh") && !name.contains("R\$") && !name.contains("R2\$")) {
+        CtClass ctClass = classPool.get(name)
+        boolean isInSource = false
+        for (item in sourceDirs) {
+            if (name.contains(item.replace(File.separator, "."))) {
+                isInSource = true
+                break
+            }
+        }
+        if (isInSource) {
             String className = name.substring(name.lastIndexOf(".") + 1)
-            if ("R".equals(className) || "BuildConfig".equals(className) || className.contains("Manifest")) {
+            //资源文件生成的类不处理,butterknife生成的类不处理
+            if ("R".equals(className)
+                    || "BuildConfig".equals(className)
+                    || className.contains("Manifest")
+                    || name.contains("R\$")
+                    || name.contains("R2\$")
+                    || name.contains("ViewBinding")) {
                 res = false
             } else {
-                if (ctClass.annotations == null) {
-                    res = true
-                } else {
-                    res = true
-                    ctClass.annotations.each { Object object ->
-                        if (object instanceof java.lang.annotation.Annotation) {
-                            def typeName = object.annotationType().typeName
-                            if (typeName.contains("com.china.bosh.mylibrary.annotation")
-                                    || typeName.contains("androidx.annotation.RestrictTo")) {
-                                Logger.w("typeName:" + typeName)
-                                res = false
+                try {
+                    if (ctClass.annotations == null) {
+                        res = true
+                    } else {
+                        res = true
+                        ctClass.annotations.each { Object object ->
+                            if (object instanceof java.lang.annotation.Annotation) {
+                                def typeName = object.annotationType().typeName
+                                //有@Open,或者已经加上@RestrictTo的不处理
+                                if (typeName.contains("com.china.bosh.mylibrary.annotation.Open")
+                                        || typeName.contains("androidx.annotation.RestrictTo")) {
+                                    Logger.i("typeName:" + typeName)
+                                    res = false
+                                }
                             }
                         }
                     }
+                } catch (ClassNotFoundException e) {
+                    res = false
                 }
+
             }
 
         }
@@ -107,7 +181,6 @@ class GenerateRestrictTo {
             cc.defrost()
         }
         cc = modifyClass(cc)
-
         bytes = cc.toBytecode()
         cc.detach()
         return bytes
@@ -150,17 +223,19 @@ class GenerateRestrictTo {
                 ZipEntry zipEntry = new ZipEntry(entryName)
                 InputStream inputStream = file.getInputStream(jarEntry)
                 jarOutputStream.putNextEntry(zipEntry)
-                Logger.w("entryName:" + entryName)
-                if (entryName.contains("bosh")) {
-                    def cc = classPool.makeClass(inputStream)
-                    if (check(cc)) {
-
-                        Logger.w('Insert init code to class >> ' + entryName)
-                        def bytes = generate(cc)
+//                Logger.w("entryName:" + entryName)
+                String name = entryName.replaceAll(File.separator, ".").replace(".class", "")
+                if (checkResourceAndRepeat(name)) {
+                    def cc = classPool.get(name)
+                    def bytes = generate(cc)
+                    if (bytes != null) {
+                        Logger.i('Insert RestrictTo code to class >> ' + entryName)
                         jarOutputStream.write(bytes)
                     } else {
                         jarOutputStream.write(IOUtils.toByteArray(inputStream))
                     }
+                } else {
+                    jarOutputStream.write(IOUtils.toByteArray(inputStream))
                 }
                 inputStream.close()
                 jarOutputStream.closeEntry()

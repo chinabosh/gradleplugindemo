@@ -5,8 +5,10 @@ import com.android.build.gradle.BaseExtension
 import com.android.build.gradle.AppExtension
 import com.android.build.gradle.LibraryExtension
 import com.android.build.gradle.LibraryPlugin
+import com.android.build.gradle.internal.LoggerWrapper
 import com.bosh.ext.ConfigExtension
 import com.bosh.task.TestTask
+import com.bosh.transform.GenerateRestrictTo
 import com.bosh.transform.RestrictToTransform
 import com.bosh.utils.Logger
 import org.gradle.api.*
@@ -16,6 +18,9 @@ class ComponentLibraryPlugin implements Plugin<Project> {
     void apply(Project project) {
         Logger.make(project)
         Logger.i("plugin demo begin!")
+
+        ConfigExtension configExtension = project.extensions.create("config", ConfigExtension.class)
+        Logger.w("enableRestrictToTransform:" + configExtension.enableRestrictToTransform)
 
 
         if (project.plugins.hasPlugin(AppPlugin)) {
@@ -62,6 +67,15 @@ class ComponentLibraryPlugin implements Plugin<Project> {
                 project.android.compileOptions.targetCompatibility = JavaVersion.VERSION_1_8
 
                 checkResourcePrefix(project)
+//                AppExtension android = getAndroid(project)
+//                android.sourceSets.each {set ->
+//
+//                }
+                project.android.sourceSets.each { set ->
+                    if ("main".equals(set.name)) {
+                        GenerateRestrictTo.searchSourcePackage(set.java.srcDirs)
+                    }
+                }
 
             }
         }
